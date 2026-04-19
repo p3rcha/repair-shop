@@ -109,3 +109,7 @@ class EstimateItem(Base):
 
     estimate: Mapped["Estimate"] = relationship(back_populates="items")
     item: Mapped["Item"] = relationship()
+
+    @property
+    def item_name(self) -> str:
+        return self.item.name if self.item is not None else ""

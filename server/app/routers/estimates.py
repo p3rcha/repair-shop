@@ -18,7 +18,11 @@ def list_estimates(
     db: DBSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[Estimate]:
-    stmt = select(Estimate).options(selectinload(Estimate.items)).order_by(Estimate.created_at.desc())
+    stmt = (
+        select(Estimate)
+        .options(selectinload(Estimate.items).selectinload(EstimateItem.item))
+        .order_by(Estimate.created_at.desc())
+    )
     if status is not None:
         stmt = stmt.where(Estimate.status == status)
     return list(db.scalars(stmt).all())
@@ -79,7 +83,7 @@ def update_status(
 ) -> Estimate:
     estimate = db.scalar(
         select(Estimate)
-        .options(selectinload(Estimate.items))
+        .options(selectinload(Estimate.items).selectinload(EstimateItem.item))
         .where(Estimate.id == estimate_id)
     )
     if not estimate:

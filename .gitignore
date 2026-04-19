@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Env files (per-stack), but always commit the samples
+**/.env
+**/.env.local
+!**/.env.sample
+
 .venv/
 __pycache__/
 *.py[cod]
