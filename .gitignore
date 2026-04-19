@@ -12,13 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Per-service env files (keep .env.sample tracked)
-.env
-.env.local
-**/.env
-**/.env.local
-!**/.env.sample
-
 .venv/
 __pycache__/
 *.py[cod]
