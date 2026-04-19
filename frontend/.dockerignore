@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-ssr
+.env
+.env.*
+.cache
+.parcel-cache
+Dockerfile
+.dockerignore
