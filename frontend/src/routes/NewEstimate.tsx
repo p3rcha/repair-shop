@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -148,17 +148,19 @@ export function NewEstimate() {
     },
   })
 
+  // useWatch re-renders this component on any field change, so persisting via
+  // an effect on `[watchedCustomer, cart, activeCategoryId]` mirrors the
+  // previous form.watch(callback) subscription without the React Compiler
+  // incompatibility warning.
+  const watchedCustomer = useWatch({ control: form.control }) as CustomerForm
+
   useEffect(() => {
-    const persist = () =>
-      saveDraft({
-        customer: form.getValues(),
-        cart,
-        activeCategoryId,
-      })
-    persist()
-    const sub = form.watch(() => persist())
-    return () => sub.unsubscribe()
-  }, [form, cart, activeCategoryId])
+    saveDraft({
+      customer: watchedCustomer,
+      cart,
+      activeCategoryId,
+    })
+  }, [watchedCustomer, cart, activeCategoryId])
 
   useEffect(() => {
     return () => {
@@ -191,7 +193,8 @@ export function NewEstimate() {
       const existing = current[item.id]
       const next = (existing?.quantity ?? 0) + delta
       if (next <= 0) {
-        const { [item.id]: _removed, ...rest } = current
+        const rest = { ...current }
+        delete rest[item.id]
         return rest
       }
       const isAddon = Number(item.base_price) === 0
@@ -202,7 +205,8 @@ export function NewEstimate() {
 
   function removeFromCart(itemId: number) {
     setCart((current) => {
-      const { [itemId]: _removed, ...rest } = current
+      const rest = { ...current }
+      delete rest[itemId]
       return rest
     })
   }

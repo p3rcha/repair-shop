@@ -34,13 +34,19 @@ export function YearCombobox({
   const [activeIndex, setActiveIndex] = useState(0)
   const [position, setPosition] = useState<Position | null>(null)
 
+  // Sync local `query` when the controlled `value` prop changes externally.
+  // React's recommended pattern for this is to adjust state during render
+  // rather than mirror props inside an effect.
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [prevValue, setPrevValue] = useState(value)
+  if (value !== prevValue) {
+    setPrevValue(value)
+    setQuery(value)
+  }
+
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLDivElement | null>(null)
   const listRef = useRef<HTMLUListElement | null>(null)
-
-  useEffect(() => {
-    setQuery(value)
-  }, [value])
 
   const filtered = useMemo(() => {
     const q = query.trim()
@@ -48,9 +54,10 @@ export function YearCombobox({
     return options.filter((y) => y.includes(q))
   }, [options, query])
 
-  useEffect(() => {
-    if (activeIndex >= filtered.length) setActiveIndex(0)
-  }, [filtered, activeIndex])
+  // Clamp `activeIndex` whenever the filtered list shrinks past it.
+  if (filtered.length > 0 && activeIndex >= filtered.length) {
+    setActiveIndex(0)
+  }
 
   const updatePosition = useCallback(() => {
     const el = triggerRef.current

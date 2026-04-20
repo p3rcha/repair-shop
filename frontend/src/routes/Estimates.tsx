@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -95,9 +95,10 @@ export function Estimates() {
   const [detailId, setDetailId] = useState<number | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Estimate | null>(null)
 
-  useEffect(() => {
+  function changeFilter(next: Filter) {
+    setFilter(next)
     setOffset(0)
-  }, [filter])
+  }
 
   const query = useEstimates({ status: filter, limit: PAGE_SIZE, offset })
   const updateStatus = useUpdateEstimateStatus()
@@ -158,7 +159,7 @@ export function Estimates() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+          <Select value={filter} onValueChange={(v) => changeFilter(v as Filter)}>
             <SelectTrigger className="min-w-44" aria-label="Filter by status">
               <SelectValue />
             </SelectTrigger>

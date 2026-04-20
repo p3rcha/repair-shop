@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -122,16 +122,17 @@ export function EditEstimate() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingPayload, setPendingPayload] = useState<EstimateCreate | null>(null)
 
-  const form = useForm<CustomerForm>({
-    resolver: zodResolver(customerSchema) as never,
-    defaultValues: emptyCustomer(),
-  })
+  // Snapshot of the loaded estimate, used to (a) detect when initial
+  // hydration has happened (`initial !== null`) and (b) compute `dirty`.
+  // Stored in state (not a ref) because both consumers read it during render.
+  const [initial, setInitial] = useState<Snapshot | null>(null)
+  const hydrated = initial !== null
 
-  const hydratedRef = useRef(false)
-  const initialRef = useRef<Snapshot | null>(null)
-
-  useEffect(() => {
-    if (!estimate || hydratedRef.current) return
+  // Hydrate local state from the loaded estimate exactly once. Done during
+  // render (not in an effect) per React's recommended pattern for
+  // initializing state from props/props-derived data. RHF's `values` prop
+  // below picks up `initial.customer` and resets form fields automatically.
+  if (estimate && !initial) {
     const customer: Required<CustomerForm> = {
       customer_name: estimate.customer_name,
       vehicle_make: estimate.vehicle_make,
@@ -139,8 +140,6 @@ export function EditEstimate() {
       vehicle_year: estimate.vehicle_year != null ? String(estimate.vehicle_year) : "",
       license_plate: estimate.license_plate ?? "",
     }
-    form.reset(customer)
-
     const nextCart: Record<number, CartLine> = {}
     for (const line of estimate.items) {
       nextCart[line.item_id] = {
@@ -153,13 +152,14 @@ export function EditEstimate() {
       }
     }
     setCart(nextCart)
+    setInitial({ customer, cart: structuredClone(nextCart) })
+  }
 
-    initialRef.current = {
-      customer,
-      cart: structuredClone(nextCart),
-    }
-    hydratedRef.current = true
-  }, [estimate, form])
+  const form = useForm<CustomerForm>({
+    resolver: zodResolver(customerSchema) as never,
+    defaultValues: emptyCustomer(),
+    values: initial?.customer,
+  })
 
   useEffect(() => {
     if (estimateQuery.error) {
@@ -197,7 +197,8 @@ export function EditEstimate() {
       const existing = current[item.id]
       const next = (existing?.quantity ?? 0) + delta
       if (next <= 0) {
-        const { [item.id]: _removed, ...rest } = current
+        const rest = { ...current }
+        delete rest[item.id]
         return rest
       }
       const isAddon = Number(item.base_price) === 0
@@ -208,7 +209,8 @@ export function EditEstimate() {
 
   function removeFromCart(itemId: number) {
     setCart((current) => {
-      const { [itemId]: _removed, ...rest } = current
+      const rest = { ...current }
+      delete rest[itemId]
       return rest
     })
   }
@@ -219,26 +221,28 @@ export function EditEstimate() {
     0,
   )
 
+  // useWatch returns a stable reference and re-renders this component whenever
+  // any field changes, so `dirty` recomputes correctly without putting the
+  // unmemoizable `form.watch()` call in the deps array.
+  const watched = useWatch({ control: form.control }) as Partial<CustomerForm>
+
   const dirty = useMemo(() => {
-    const init = initialRef.current
-    if (!init) return false
-    const cur = form.watch()
-    if (cur.customer_name !== init.customer.customer_name) return true
-    if (cur.vehicle_make !== init.customer.vehicle_make) return true
-    if (cur.vehicle_model !== init.customer.vehicle_model) return true
-    if ((cur.vehicle_year ?? "") !== init.customer.vehicle_year) return true
-    if ((cur.license_plate ?? "") !== init.customer.license_plate) return true
+    if (!initial) return false
+    if ((watched.customer_name ?? "") !== initial.customer.customer_name) return true
+    if ((watched.vehicle_make ?? "") !== initial.customer.vehicle_make) return true
+    if ((watched.vehicle_model ?? "") !== initial.customer.vehicle_model) return true
+    if ((watched.vehicle_year ?? "") !== initial.customer.vehicle_year) return true
+    if ((watched.license_plate ?? "") !== initial.customer.license_plate) return true
     const curIds = Object.keys(cart)
       .map(Number)
       .sort((a, b) => a - b)
-    const initIds = Object.keys(init.cart)
+    const initIds = Object.keys(initial.cart)
       .map(Number)
       .sort((a, b) => a - b)
     if (curIds.length !== initIds.length) return true
     if (curIds.some((id, idx) => id !== initIds[idx])) return true
-    return curIds.some((id) => cart[id].quantity !== init.cart[id].quantity)
-    // form.watch() must be in deps so re-renders trigger this memo on field changes
-  }, [cart, form, form.watch()])
+    return curIds.some((id) => cart[id].quantity !== initial.cart[id].quantity)
+  }, [cart, watched, initial])
 
   function buildPayload(rawValues: CustomerForm): EstimateCreate {
     const values = customerSchema.parse(rawValues) as CustomerFormParsed
@@ -283,7 +287,7 @@ export function EditEstimate() {
     }
   }
 
-  if (estimateLoading || !hydratedRef.current) {
+  if (estimateLoading || !hydrated) {
     return (
       <div className="flex flex-col gap-6">
         <Skeleton className="h-10 w-64" />
