@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate, useParams } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -25,10 +25,25 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { YearCombobox } from "@/components/YearCombobox"
 
 import { ApiError } from "@/lib/api"
-import { useCategories, useCategoryItems, useCreateEstimate } from "@/lib/queries"
+import {
+  useCategories,
+  useCategoryItems,
+  useEstimate,
+  useUpdateEstimate,
+} from "@/lib/queries"
 import { getCategoryIcon } from "@/lib/category-icons"
 import { cn } from "@/lib/utils"
 import type { EstimateCreate, Item } from "@/lib/types"
@@ -62,109 +77,100 @@ type CustomerFormParsed = z.output<typeof customerSchema>
 
 type CartLine = { item: Item; quantity: number }
 
+type Snapshot = {
+  customer: Required<CustomerForm>
+  cart: Record<number, CartLine>
+}
+
 function formatMoney(n: number) {
   return n.toLocaleString(undefined, { style: "currency", currency: "USD" })
 }
 
-const DRAFT_STORAGE_KEY = "repair-shop:estimate-draft:v1"
-
-type EstimateDraft = {
-  customer: CustomerForm
-  cart: Record<number, CartLine>
-  activeCategoryId: number | null
-}
-
-function loadDraft(): EstimateDraft | null {
-  if (typeof window === "undefined") return null
-  try {
-    const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<EstimateDraft>
-    if (!parsed || typeof parsed !== "object") return null
-    return {
-      customer: parsed.customer ?? {
-        customer_name: "",
-        vehicle_make: "",
-        vehicle_model: "",
-        vehicle_year: "",
-        license_plate: "",
-      },
-      cart: parsed.cart ?? {},
-      activeCategoryId: parsed.activeCategoryId ?? null,
-    }
-  } catch {
-    return null
+function emptyCustomer(): Required<CustomerForm> {
+  return {
+    customer_name: "",
+    vehicle_make: "",
+    vehicle_model: "",
+    vehicle_year: "",
+    license_plate: "",
   }
 }
 
-function saveDraft(draft: EstimateDraft) {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft))
-  } catch {
-    // ignore quota or serialization errors
-  }
-}
-
-function clearDraft() {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.removeItem(DRAFT_STORAGE_KEY)
-  } catch {
-    // ignore
-  }
-}
-
-export function NewEstimate() {
+export function EditEstimate() {
   const navigate = useNavigate()
+  const params = useParams<{ id: string }>()
+  const idNum = params.id ? Number(params.id) : NaN
+  const estimateId = Number.isFinite(idNum) ? idNum : null
 
-  const [draft] = useState(() => loadDraft())
+  const estimateQuery = useEstimate(estimateId)
+  const estimate = estimateQuery.data ?? null
+  const estimateLoading = estimateQuery.isLoading
 
   const categoriesQuery = useCategories()
   const categories = categoriesQuery.data ?? null
   const categoriesLoading = categoriesQuery.isLoading
 
-  const [activeCategoryId, setActiveCategoryId] = useState<number | null>(
-    draft?.activeCategoryId ?? null,
-  )
+  const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null)
   const itemsQuery = useCategoryItems(activeCategoryId)
   const items = itemsQuery.data ?? null
   const itemsLoading = itemsQuery.isFetching && activeCategoryId != null
 
-  const [cart, setCart] = useState<Record<number, CartLine>>(
-    () => draft?.cart ?? {},
-  )
-  const createEstimate = useCreateEstimate()
-  const submitting = createEstimate.isPending
+  const [cart, setCart] = useState<Record<number, CartLine>>({})
+  const updateEstimate = useUpdateEstimate()
+  const submitting = updateEstimate.isPending
+
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingPayload, setPendingPayload] = useState<EstimateCreate | null>(null)
 
   const form = useForm<CustomerForm>({
     resolver: zodResolver(customerSchema) as never,
-    defaultValues: draft?.customer ?? {
-      customer_name: "",
-      vehicle_make: "",
-      vehicle_model: "",
-      vehicle_year: "",
-      license_plate: "",
-    },
+    defaultValues: emptyCustomer(),
   })
 
-  useEffect(() => {
-    const persist = () =>
-      saveDraft({
-        customer: form.getValues(),
-        cart,
-        activeCategoryId,
-      })
-    persist()
-    const sub = form.watch(() => persist())
-    return () => sub.unsubscribe()
-  }, [form, cart, activeCategoryId])
+  const hydratedRef = useRef(false)
+  const initialRef = useRef<Snapshot | null>(null)
 
   useEffect(() => {
-    return () => {
-      clearDraft()
+    if (!estimate || hydratedRef.current) return
+    const customer: Required<CustomerForm> = {
+      customer_name: estimate.customer_name,
+      vehicle_make: estimate.vehicle_make,
+      vehicle_model: estimate.vehicle_model,
+      vehicle_year: estimate.vehicle_year != null ? String(estimate.vehicle_year) : "",
+      license_plate: estimate.license_plate ?? "",
     }
-  }, [])
+    form.reset(customer)
+
+    const nextCart: Record<number, CartLine> = {}
+    for (const line of estimate.items) {
+      nextCart[line.item_id] = {
+        item: {
+          id: line.item_id,
+          name: line.item_name,
+          base_price: line.unit_price,
+        },
+        quantity: line.quantity,
+      }
+    }
+    setCart(nextCart)
+
+    initialRef.current = {
+      customer,
+      cart: structuredClone(nextCart),
+    }
+    hydratedRef.current = true
+  }, [estimate, form])
+
+  useEffect(() => {
+    if (estimateQuery.error) {
+      const message =
+        estimateQuery.error instanceof ApiError
+          ? estimateQuery.error.message
+          : "Failed to load estimate"
+      toast.error(message)
+      navigate("/estimates")
+    }
+  }, [estimateQuery.error, navigate])
 
   useEffect(() => {
     if (categoriesQuery.error) {
@@ -213,13 +219,30 @@ export function NewEstimate() {
     0,
   )
 
-  async function onSubmit(rawValues: CustomerForm) {
-    const values = rawValues as unknown as CustomerFormParsed
-    if (cartLines.length === 0) {
-      toast.error("Add at least one item")
-      return
-    }
-    const payload: EstimateCreate = {
+  const dirty = useMemo(() => {
+    const init = initialRef.current
+    if (!init) return false
+    const cur = form.watch()
+    if (cur.customer_name !== init.customer.customer_name) return true
+    if (cur.vehicle_make !== init.customer.vehicle_make) return true
+    if (cur.vehicle_model !== init.customer.vehicle_model) return true
+    if ((cur.vehicle_year ?? "") !== init.customer.vehicle_year) return true
+    if ((cur.license_plate ?? "") !== init.customer.license_plate) return true
+    const curIds = Object.keys(cart)
+      .map(Number)
+      .sort((a, b) => a - b)
+    const initIds = Object.keys(init.cart)
+      .map(Number)
+      .sort((a, b) => a - b)
+    if (curIds.length !== initIds.length) return true
+    if (curIds.some((id, idx) => id !== initIds[idx])) return true
+    return curIds.some((id) => cart[id].quantity !== init.cart[id].quantity)
+    // form.watch() must be in deps so re-renders trigger this memo on field changes
+  }, [cart, form, form.watch()])
+
+  function buildPayload(rawValues: CustomerForm): EstimateCreate {
+    const values = customerSchema.parse(rawValues) as CustomerFormParsed
+    return {
       customer_name: values.customer_name,
       vehicle_make: values.vehicle_make,
       vehicle_model: values.vehicle_model,
@@ -227,15 +250,52 @@ export function NewEstimate() {
       license_plate: values.license_plate,
       items: cartLines.map((l) => ({ item_id: l.item.id, quantity: l.quantity })),
     }
+  }
+
+  function onSubmit(rawValues: CustomerForm) {
+    if (cartLines.length === 0) {
+      toast.error("Add at least one item")
+      return
+    }
+    if (!dirty) {
+      toast.message("No changes to save")
+      return
+    }
+    const payload = buildPayload(rawValues)
+    setPendingPayload(payload)
+    setConfirmOpen(true)
+  }
+
+  async function confirmSave() {
+    if (!estimateId || !pendingPayload) return
     try {
-      const created = await createEstimate.mutateAsync(payload)
-      clearDraft()
-      toast.success(`Estimate #${created.id} created · ${formatMoney(Number(created.total))}`)
+      const updated = await updateEstimate.mutateAsync({
+        id: estimateId,
+        payload: pendingPayload,
+      })
+      toast.success(`Estimate #${updated.id} updated · ${formatMoney(Number(updated.total))}`)
+      setConfirmOpen(false)
+      setPendingPayload(null)
       navigate("/estimates")
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to create estimate"
+      const message = err instanceof ApiError ? err.message : "Failed to update estimate"
       toast.error(message)
     }
+  }
+
+  if (estimateLoading || !hydratedRef.current) {
+    return (
+      <div className="flex flex-col gap-6">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="flex flex-col gap-6 lg:col-span-2">
+            <Skeleton className="h-64 w-full" />
+            <Skeleton className="h-48 w-full" />
+          </div>
+          <Skeleton className="h-80 w-full" />
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -244,9 +304,11 @@ export function NewEstimate() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-col gap-1">
             <h2 className="text-xs uppercase tracking-widest text-muted-foreground">
-              New estimate
+              Edit estimate
             </h2>
-            <p className="font-heading text-2xl">Build a repair order</p>
+            <p className="font-heading text-2xl">
+              Estimate #{estimate?.id}
+            </p>
           </div>
           <Button type="button" variant="ghost" size="sm" onClick={() => navigate(-1)}>
             <HugeiconsIcon icon={ArrowLeft02Icon} />
@@ -524,15 +586,39 @@ export function NewEstimate() {
 
                 <Button
                   type="submit"
-                  disabled={cartLines.length === 0 || submitting}
+                  disabled={cartLines.length === 0 || !dirty || submitting}
                   className="w-full"
                 >
-                  {submitting ? "Creating" : "Create estimate"}
+                  {submitting ? "Saving" : dirty ? "Save changes" : "No changes"}
                 </Button>
               </CardContent>
             </Card>
           </div>
         </div>
+
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Save changes?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will overwrite estimate #{estimate?.id} with the current customer,
+                vehicle, and line items. The status and creation date will not change.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={submitting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault()
+                  void confirmSave()
+                }}
+                disabled={submitting}
+              >
+                {submitting ? "Saving" : "Save changes"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </form>
     </Form>
   )

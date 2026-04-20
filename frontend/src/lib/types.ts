@@ -49,3 +49,10 @@ export type EstimateCreate = {
   license_plate?: string | null
   items: { item_id: number; quantity: number }[]
 }
+
+export type PaginatedEstimates = {
+  items: Estimate[]
+  total: number
+  limit: number
+  offset: number
+}

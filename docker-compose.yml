@@ -22,7 +22,17 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
-    command: fastapi dev app/main.py --host 0.0.0.0 --port 8000
+    command: ./scripts/start.sh
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz').read()"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     volumes:
       - ./server:/app
       - /app/__pycache__
@@ -32,7 +42,8 @@ services:
     restart: unless-stopped
     env_file: ./frontend/.env
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "5173:5173"
     command: bun run dev --host 0.0.0.0

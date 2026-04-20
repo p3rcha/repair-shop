@@ -93,5 +93,12 @@ class EstimateOut(BaseModel):
     items: list[EstimateItemOut]
 
 
+class PaginatedEstimates(BaseModel):
+    items: list[EstimateOut]
+    total: int
+    limit: int
+    offset: int
+
+
 class StatusUpdateIn(BaseModel):
     status: EstimateStatus

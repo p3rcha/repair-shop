@@ -4,6 +4,7 @@ import { AppLayout } from "@/routes/AppLayout"
 import { Login } from "@/routes/Login"
 import { Estimates } from "@/routes/Estimates"
 import { NewEstimate } from "@/routes/NewEstimate"
+import { EditEstimate } from "@/routes/EditEstimate"
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
           <Route index element={<Navigate to="/estimates" replace />} />
           <Route path="/estimates" element={<Estimates />} />
           <Route path="/estimates/new" element={<NewEstimate />} />
+          <Route path="/estimates/:id/edit" element={<EditEstimate />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

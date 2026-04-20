@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useState } from "react"
-import { Link } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Add01Icon, MoreHorizontalIcon, RefreshIcon } from "@hugeicons/core-free-icons"
+import {
+  Add01Icon,
+  ArrowLeft02Icon,
+  ArrowRight02Icon,
+  Delete02Icon,
+  Edit02Icon,
+  MoreHorizontalIcon,
+  RefreshIcon,
+} from "@hugeicons/core-free-icons"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -30,14 +38,25 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
-import { api, ApiError } from "@/lib/api"
+import { ApiError } from "@/lib/api"
 import {
   ESTIMATE_STATUSES,
   STATUS_LABEL,
   type Estimate,
   type EstimateStatus,
 } from "@/lib/types"
+import { useDeleteEstimate, useEstimates, useUpdateEstimateStatus } from "@/lib/queries"
 import { StatusBadge } from "@/components/StatusBadge"
 import { EstimateDetailDialog } from "@/components/EstimateDetailDialog"
 
@@ -48,6 +67,8 @@ const FILTER_LABEL: Record<Filter, string> = {
   all: "All statuses",
   ...STATUS_LABEL,
 }
+
+const PAGE_SIZE = 20
 
 function formatMoney(value: string) {
   const n = Number(value)
@@ -68,47 +89,57 @@ function formatDate(iso: string) {
 }
 
 export function Estimates() {
+  const navigate = useNavigate()
   const [filter, setFilter] = useState<Filter>("all")
-  const [data, setData] = useState<Estimate[] | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [offset, setOffset] = useState(0)
   const [detailId, setDetailId] = useState<number | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const qs = filter === "all" ? "" : `?status=${filter}`
-      const list = await api.get<Estimate[]>(`/estimates${qs}`)
-      setData(list)
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load estimates"
-      setError(message)
-      setData([])
-    } finally {
-      setLoading(false)
-    }
-  }, [filter])
+  const [pendingDelete, setPendingDelete] = useState<Estimate | null>(null)
 
   useEffect(() => {
-    void load()
-  }, [load])
+    setOffset(0)
+  }, [filter])
+
+  const query = useEstimates({ status: filter, limit: PAGE_SIZE, offset })
+  const updateStatus = useUpdateEstimateStatus()
+  const deleteEstimate = useDeleteEstimate()
+
+  const data = query.data?.items ?? null
+  const total = query.data?.total ?? 0
+  const loading = query.isLoading
+  const error = query.error
+    ? query.error instanceof ApiError
+      ? query.error.message
+      : "Failed to load estimates"
+    : null
+
+  const page = Math.floor(offset / PAGE_SIZE) + 1
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const canPrev = offset > 0
+  const canNext = offset + PAGE_SIZE < total
 
   async function changeStatus(estimate: Estimate, next: EstimateStatus) {
     if (estimate.status === next) return
     try {
-      const updated = await api.patch<Estimate>(`/estimates/${estimate.id}/status`, {
-        status: next,
-      })
-      setData((current) =>
-        current ? current.map((e) => (e.id === updated.id ? updated : e)) : current,
-      )
+      await updateStatus.mutateAsync({ id: estimate.id, status: next })
       toast.success(`Estimate #${estimate.id} → ${STATUS_LABEL[next]}`)
-      if (filter !== "all" && updated.status !== filter) {
-        setData((current) => (current ? current.filter((e) => e.id !== updated.id) : current))
-      }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Failed to update status"
+      toast.error(message)
+    }
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return
+    const target = pendingDelete
+    try {
+      await deleteEstimate.mutateAsync(target.id)
+      toast.success(`Estimate #${target.id} deleted`)
+      if (detailId === target.id) setDetailId(null)
+      const lastOnPage = (data?.length ?? 0) === 1 && offset > 0
+      if (lastOnPage) setOffset((o) => Math.max(0, o - PAGE_SIZE))
+      setPendingDelete(null)
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Failed to delete estimate"
       toast.error(message)
     }
   }
@@ -121,7 +152,9 @@ export function Estimates() {
             Estimates
           </h2>
           <p className="font-heading text-2xl">
-            {loading ? "—" : `${data?.length ?? 0} ${(data?.length ?? 0) === 1 ? "result" : "results"}`}
+            {loading
+              ? "—"
+              : `${total} ${total === 1 ? "result" : "results"}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -137,7 +170,12 @@ export function Estimates() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={load} aria-label="Refresh">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => query.refetch()}
+            aria-label="Refresh"
+          >
             <HugeiconsIcon icon={RefreshIcon} />
             Refresh
           </Button>
@@ -243,6 +281,17 @@ export function Estimates() {
                           <DropdownMenuItem onSelect={() => setDetailId(e.id)}>
                             View details
                           </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => navigate(`/estimates/${e.id}/edit`)}>
+                            <HugeiconsIcon icon={Edit02Icon} />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setPendingDelete(e)}
+                          >
+                            <HugeiconsIcon icon={Delete02Icon} />
+                            Delete
+                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuLabel>Set status</DropdownMenuLabel>
                           {ESTIMATE_STATUSES.map((s) => (
@@ -264,13 +313,78 @@ export function Estimates() {
         </CardContent>
       </Card>
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs uppercase tracking-widest text-muted-foreground">
+          {total > 0
+            ? `Page ${page} of ${totalPages} · ${total} total`
+            : ""}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!canPrev || loading}
+            onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+          >
+            <HugeiconsIcon icon={ArrowLeft02Icon} />
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!canNext || loading}
+            onClick={() => setOffset((o) => o + PAGE_SIZE)}
+          >
+            Next
+            <HugeiconsIcon icon={ArrowRight02Icon} />
+          </Button>
+        </div>
+      </div>
+
       <EstimateDetailDialog
         estimate={data?.find((e) => e.id === detailId) ?? null}
         open={detailId !== null}
         onOpenChange={(open) => {
           if (!open) setDetailId(null)
         }}
+        onEdit={(id) => {
+          setDetailId(null)
+          navigate(`/estimates/${id}/edit`)
+        }}
       />
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteEstimate.isPending) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete estimate?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete
+                ? `Estimate #${pendingDelete.id} for ${pendingDelete.customer_name} (${pendingDelete.vehicle_make} ${pendingDelete.vehicle_model}) will be permanently removed. This cannot be undone.`
+                : "This cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteEstimate.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleteEstimate.isPending}
+              onClick={(e) => {
+                e.preventDefault()
+                void confirmDelete()
+              }}
+            >
+              {deleteEstimate.isPending ? "Deleting" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

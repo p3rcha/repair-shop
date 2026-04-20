@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from ..config import settings
 from ..deps import COOKIE_NAME, extract_token, get_current_user, get_db
+from ..limiter import limiter
 from ..models import User
 from ..schemas import LoginIn, RegisterIn, UserOut
 from ..security import create_token, hash_password, verify_password
@@ -71,9 +72,10 @@ def register(
 
 
 @router.post("/login", response_model=UserOut)
+@limiter.limit("5/minute")
 def login(
-    payload: LoginIn,
     request: Request,
+    payload: LoginIn,
     response: Response,
     db: DBSession = Depends(get_db),
 ) -> User:

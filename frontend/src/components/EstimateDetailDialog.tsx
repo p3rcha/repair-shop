@@ -1,10 +1,15 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Edit02Icon } from "@hugeicons/core-free-icons"
+
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { StatusBadge } from "@/components/StatusBadge"
 import type { Estimate } from "@/lib/types"
@@ -31,6 +36,7 @@ type Props = {
   estimate: Estimate | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  onEdit?: (id: number) => void
 }
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -44,7 +50,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-export function EstimateDetailDialog({ estimate, open, onOpenChange }: Props) {
+export function EstimateDetailDialog({ estimate, open, onOpenChange, onEdit }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -118,6 +124,15 @@ export function EstimateDetailDialog({ estimate, open, onOpenChange }: Props) {
                 {formatMoney(estimate.total)}
               </span>
             </div>
+
+            {onEdit && (
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => onEdit(estimate.id)}>
+                  <HugeiconsIcon icon={Edit02Icon} />
+                  Edit estimate
+                </Button>
+              </DialogFooter>
+            )}
           </>
         )}
       </DialogContent>
