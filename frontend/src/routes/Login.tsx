@@ -106,9 +106,6 @@ export function Login() {
                 <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting ? "Signing in" : "Sign in"}
                 </Button>
-                <p className="text-[0.65rem] uppercase tracking-widest text-muted-foreground">
-                  default: admin / admin123
-                </p>
               </CardFooter>
             </form>
           </Form>
