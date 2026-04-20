@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session as DBSession
 
 from .database import Base, SessionLocal, engine
@@ -108,8 +108,20 @@ def _seed_catalog(db: DBSession) -> None:
     db.commit()
 
 
+def _apply_lightweight_migrations() -> None:
+    """Idempotent ALTERs for column nullability changes that `create_all` won't apply."""
+    statements = (
+        "ALTER TABLE estimates ALTER COLUMN vehicle_year DROP NOT NULL",
+        "ALTER TABLE estimates ALTER COLUMN license_plate DROP NOT NULL",
+    )
+    with engine.begin() as conn:
+        for stmt in statements:
+            conn.execute(text(stmt))
+
+
 def run() -> None:
     Base.metadata.create_all(bind=engine)
+    _apply_lightweight_migrations()
     with SessionLocal() as db:
         _seed_admin(db)
         _seed_catalog(db)

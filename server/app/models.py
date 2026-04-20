@@ -78,8 +78,8 @@ class Estimate(Base):
     customer_name: Mapped[str] = mapped_column(String(120), nullable=False)
     vehicle_make: Mapped[str] = mapped_column(String(60), nullable=False)
     vehicle_model: Mapped[str] = mapped_column(String(60), nullable=False)
-    vehicle_year: Mapped[int] = mapped_column(Integer, nullable=False)
-    license_plate: Mapped[str] = mapped_column(String(20), nullable=False)
+    vehicle_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    license_plate: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[EstimateStatus] = mapped_column(
         Enum(EstimateStatus, name="estimate_status"),
         default=EstimateStatus.pending,

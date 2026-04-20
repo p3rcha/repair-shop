@@ -25,24 +25,39 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import { YearCombobox } from "@/components/YearCombobox"
 
 import { api, ApiError } from "@/lib/api"
 import { getCategoryIcon } from "@/lib/category-icons"
 import { cn } from "@/lib/utils"
 import type { Category, Estimate, EstimateCreate, Item } from "@/lib/types"
 
+const CURRENT_YEAR = new Date().getFullYear()
+const YEAR_OPTIONS = Array.from({ length: CURRENT_YEAR - 1969 }, (_, i) =>
+  String(CURRENT_YEAR - i),
+)
+
 const customerSchema = z.object({
   customer_name: z.string().min(1, "Required"),
   vehicle_make: z.string().min(1, "Required"),
   vehicle_model: z.string().min(1, "Required"),
   vehicle_year: z
-    .union([z.string().length(0), z.coerce.number().int().min(1900).max(2100)])
+    .string()
     .optional()
-    .transform((v) => (typeof v === "number" ? v : null)),
-  license_plate: z.string().max(20).optional().transform((v) => v?.trim() || null),
+    .transform((v) => {
+      if (!v) return null
+      const n = Number(v)
+      return Number.isFinite(n) ? n : null
+    }),
+  license_plate: z
+    .string()
+    .max(20)
+    .optional()
+    .transform((v) => v?.trim() || null),
 })
 
-type CustomerForm = z.infer<typeof customerSchema>
+type CustomerForm = z.input<typeof customerSchema>
+type CustomerFormParsed = z.output<typeof customerSchema>
 
 type CartLine = { item: Item; quantity: number }
 
@@ -50,29 +65,96 @@ function formatMoney(n: number) {
   return n.toLocaleString(undefined, { style: "currency", currency: "USD" })
 }
 
+const DRAFT_STORAGE_KEY = "repair-shop:estimate-draft:v1"
+
+type EstimateDraft = {
+  customer: CustomerForm
+  cart: Record<number, CartLine>
+  activeCategoryId: number | null
+}
+
+function loadDraft(): EstimateDraft | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<EstimateDraft>
+    if (!parsed || typeof parsed !== "object") return null
+    return {
+      customer: parsed.customer ?? {
+        customer_name: "",
+        vehicle_make: "",
+        vehicle_model: "",
+        vehicle_year: "",
+        license_plate: "",
+      },
+      cart: parsed.cart ?? {},
+      activeCategoryId: parsed.activeCategoryId ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function saveDraft(draft: EstimateDraft) {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft))
+  } catch {
+    // ignore quota or serialization errors
+  }
+}
+
+function clearDraft() {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.removeItem(DRAFT_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 export function NewEstimate() {
   const navigate = useNavigate()
+
+  const [draft] = useState(() => loadDraft())
 
   const [categories, setCategories] = useState<Category[] | null>(null)
   const [categoriesLoading, setCategoriesLoading] = useState(true)
 
-  const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null)
+  const [activeCategoryId, setActiveCategoryId] = useState<number | null>(
+    draft?.activeCategoryId ?? null,
+  )
   const [items, setItems] = useState<Item[] | null>(null)
   const [itemsLoading, setItemsLoading] = useState(false)
 
-  const [cart, setCart] = useState<Record<number, CartLine>>({})
+  const [cart, setCart] = useState<Record<number, CartLine>>(
+    () => draft?.cart ?? {},
+  )
   const [submitting, setSubmitting] = useState(false)
 
   const form = useForm<CustomerForm>({
     resolver: zodResolver(customerSchema) as never,
-    defaultValues: {
+    defaultValues: draft?.customer ?? {
       customer_name: "",
       vehicle_make: "",
       vehicle_model: "",
-      vehicle_year: undefined,
+      vehicle_year: "",
       license_plate: "",
     },
   })
+
+  useEffect(() => {
+    const persist = () =>
+      saveDraft({
+        customer: form.getValues(),
+        cart,
+        activeCategoryId,
+      })
+    persist()
+    const sub = form.watch(() => persist())
+    return () => sub.unsubscribe()
+  }, [form, cart, activeCategoryId])
 
   useEffect(() => {
     setCategoriesLoading(true)
@@ -138,7 +220,8 @@ export function NewEstimate() {
     0,
   )
 
-  async function onSubmit(values: CustomerForm) {
+  async function onSubmit(rawValues: CustomerForm) {
+    const values = rawValues as unknown as CustomerFormParsed
     if (cartLines.length === 0) {
       toast.error("Add at least one item")
       return
@@ -149,11 +232,12 @@ export function NewEstimate() {
         customer_name: values.customer_name,
         vehicle_make: values.vehicle_make,
         vehicle_model: values.vehicle_model,
-        vehicle_year: values.vehicle_year ?? null,
-        license_plate: values.license_plate ?? null,
+        vehicle_year: values.vehicle_year,
+        license_plate: values.license_plate,
         items: cartLines.map((l) => ({ item_id: l.item.id, quantity: l.quantity })),
       }
       const created = await api.post<Estimate>("/estimates", payload)
+      clearDraft()
       toast.success(`Estimate #${created.id} created · ${formatMoney(Number(created.total))}`)
       navigate("/estimates")
     } catch (err) {
@@ -235,12 +319,11 @@ export function NewEstimate() {
                     <FormItem>
                       <FormLabel>Year</FormLabel>
                       <FormControl>
-                        <Input
-                          type="number"
-                          inputMode="numeric"
-                          placeholder="1992"
-                          {...field}
+                        <YearCombobox
                           value={field.value ?? ""}
+                          onChange={field.onChange}
+                          options={YEAR_OPTIONS}
+                          placeholder="Type or pick a year"
                         />
                       </FormControl>
                       <FormMessage />

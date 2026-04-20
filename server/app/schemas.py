@@ -66,9 +66,16 @@ class EstimateIn(BaseModel):
     customer_name: Annotated[str, Field(min_length=1, max_length=120)]
     vehicle_make: Annotated[str, Field(min_length=1, max_length=60)]
     vehicle_model: Annotated[str, Field(min_length=1, max_length=60)]
-    vehicle_year: Annotated[int, Field(ge=1900, le=2100)]
-    license_plate: Annotated[str, Field(min_length=1, max_length=20)]
+    vehicle_year: Annotated[int | None, Field(ge=1900, le=2100)] = None
+    license_plate: Annotated[str | None, Field(max_length=20)] = None
     items: list[EstimateItemIn] = Field(min_length=1)
+
+    @field_validator("license_plate", mode="before")
+    @classmethod
+    def _empty_plate_to_none(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 
 class EstimateOut(BaseModel):
@@ -78,8 +85,8 @@ class EstimateOut(BaseModel):
     customer_name: str
     vehicle_make: str
     vehicle_model: str
-    vehicle_year: int
-    license_plate: str
+    vehicle_year: int | None
+    license_plate: str | None
     status: EstimateStatus
     total: Decimal
     created_at: datetime
