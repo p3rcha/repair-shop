@@ -26,6 +26,7 @@ async def list_items(
     db: DBSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[Item]:
+    # Hardcoded sleep to simulate API latency
     await asyncio.sleep(0.6)
 
     category = db.get(Category, category_id)

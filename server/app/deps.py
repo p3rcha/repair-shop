@@ -21,15 +21,7 @@ def get_db() -> Generator[DBSession, None, None]:
 
 
 def extract_token(request: Request) -> str | None:
-    cookie = request.cookies.get(COOKIE_NAME)
-    if cookie:
-        return cookie
-
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth and auth.lower().startswith("bearer "):
-        return auth[7:].strip()
-
-    return None
+    return request.cookies.get(COOKIE_NAME)
 
 
 def _unauth(detail: str = "Unauthorized") -> HTTPException:
