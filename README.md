@@ -17,10 +17,6 @@ A small, containerized web app to manage vehicle repair estimates. FastAPI + Pos
 ## Run it
 
 ```bash
-cp db/.env.sample        db/.env
-cp server/.env.sample    server/.env
-cp frontend/.env.sample  frontend/.env
-
 docker compose up --build
 ```
 
