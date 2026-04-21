@@ -109,10 +109,4 @@ CI runs the same `pytest` invocation on every push and PR via [`.github/workflow
 
 ## Migrations
 
-Schema changes are managed with **Alembic**. The container entry point ([`server/scripts/start.sh`](server/scripts/start.sh)) runs `alembic upgrade head` before booting FastAPI, so a fresh `docker compose up` always lands on the latest schema. To create a new revision locally:
-
-```bash
-cd server && source .venv/bin/activate
-alembic revision --autogenerate -m "describe the change"
-alembic upgrade head
-```
+Schema changes are managed with **Alembic**. The container entry point ([`server/scripts/start.sh`](server/scripts/start.sh)) runs `alembic upgrade head` before booting FastAPI, so a fresh `docker compose up` always lands on the latest schema.
